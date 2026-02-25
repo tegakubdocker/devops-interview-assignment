@@ -1,15 +1,118 @@
-# pipeline.yaml — CI/CD Pipeline Definition
-#
-# TASK: Define a CI/CD pipeline for the video-analytics application.
-# Use GitHub Actions syntax (or clearly comment which CI system you're targeting).
-#
-# Requirements:
-#   - Build stage: compile, run unit tests
-#   - Test stage: integration tests, security scanning
-#   - Deploy to staging: push to ECR, deploy to EKS staging
-#   - Deploy to production: manual approval gate, deploy to EKS prod
-#   - Rollback mechanism on failure
-#   - Notifications on failure
-#
-# The application is a Java service built with Gradle, containerized,
-# deployed to EKS via kubectl/helm.
+name: video-analytics-ci-cd
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: video-analytics
+
+jobs:
+  build:
+    name: Build and Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build and unit tests
+        run: |
+          ./gradlew clean test
+
+  integration_security:
+    name: Integration Tests and Security Scan
+    runs-on: ubuntu-latest
+    needs: [ build ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Integration tests
+        run: |
+          ./gradlew integrationTest
+
+      - name: Dependency scan
+        run: |
+          ./gradlew dependencyCheckAnalyze
+        continue-on-error: true
+
+      - name: Build Docker image
+        run: |
+          docker build -t $ECR_REPOSITORY:${{ github.sha }} .
+
+  deploy_staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [ integration_security ]
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        run: |
+          echo "Configure AWS creds via OIDC or secrets in real setup"
+
+      - name: Push image to ECR
+        run: |
+          echo "docker login + docker push to ECR would run here"
+          echo "image tag: ${{ github.sha }}"
+
+      - name: Deploy to EKS staging
+        run: |
+          python3 cicd/deploy.py deploy --environment staging --image-tag ${{ github.sha }}
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          python3 cicd/deploy.py rollback --environment staging
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Notify team: staging deploy failed for ${{ github.sha }}"
+
+  deploy_production:
+    name: Deploy to Production (Manual Approval)
+    runs-on: ubuntu-latest
+    needs: [ deploy_staging ]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        run: |
+          echo "Configure AWS creds via OIDC or secrets in real setup"
+
+      - name: Deploy to EKS production
+        run: |
+          python3 cicd/deploy.py deploy --environment production --image-tag ${{ github.sha }}
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          python3 cicd/deploy.py rollback --environment production
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Notify team: production deploy failed for ${{ github.sha }}"

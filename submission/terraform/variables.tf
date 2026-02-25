@@ -26,10 +26,6 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
-variable "management_cidr" {
-  description = "CIDR block for management access (SSH to bastion)"
-  type        = string
-}
 variable "environment" {
   description = "Environment name (e.g., dev, staging, prod)"
   type        = string
