@@ -1,8 +1,50 @@
-# networkpolicy.yaml — Network Policy
-#
-# TASK: Create a NetworkPolicy for the video-processor pods.
-#
-# Requirements:
-#   - Restrict ingress to only necessary sources
-#   - Consider what services need to communicate with the video processor
-#   - Default deny is a good starting point
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: video-processor-policy
+  namespace: video-analytics
+spec:
+  podSelector:
+    matchLabels:
+      app: video-processor
+  policyTypes:
+  - Ingress
+  - Egress
+
+  ingress:
+  - from:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+
+  egress:
+  # DNS to kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+  # Kafka / MSK broker access
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: TCP
+      port: 9092
+
+  # HTTPS to AWS endpoints (S3, STS, etc.)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: TCP
+      port: 443

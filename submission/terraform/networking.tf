@@ -79,7 +79,7 @@ resource "aws_internet_gateway" "main" {
 }
 
 # --- NAT Gateway ---
-# BUG 1: NAT Gateway is placed in a private subnet. It must be in a public subnet.
+# FIX BUG 1: NAT Gateway must be in a public subnet.
 
 resource "aws_eip" "nat" {
   domain = "vpc"
@@ -87,11 +87,13 @@ resource "aws_eip" "nat" {
 
 resource "aws_nat_gateway" "main" {
   allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.private_a.id  # BUG: should be public subnet
+  subnet_id     = aws_subnet.public_a.id
 
   tags = {
     Name = "${var.cluster_name}-nat"
   }
+
+  depends_on = [aws_internet_gateway.main]
 }
 
 # --- Route Tables ---
@@ -122,16 +124,16 @@ resource "aws_route_table" "private" {
   }
 }
 
-# BUG 2: Public subnets are associated with the private route table instead of the public one.
+# FIX BUG 2: Public subnets must associate to public route table.
 
 resource "aws_route_table_association" "public_a" {
   subnet_id      = aws_subnet.public_a.id
-  route_table_id = aws_route_table.private.id  # BUG: should be public route table
+  route_table_id = aws_route_table.public.id
 }
 
 resource "aws_route_table_association" "public_b" {
   subnet_id      = aws_subnet.public_b.id
-  route_table_id = aws_route_table.private.id  # BUG: should be public route table
+  route_table_id = aws_route_table.public.id
 }
 
 resource "aws_route_table_association" "private_a" {
@@ -146,7 +148,7 @@ resource "aws_route_table_association" "private_b" {
 
 # --- Security Groups ---
 
-# BUG 3: SSH is open to the entire internet (0.0.0.0/0). Restrict to a management CIDR.
+# FIX BUG 3: Restrict SSH to management CIDR.
 
 resource "aws_security_group" "bastion" {
   name_prefix = "${var.cluster_name}-bastion-"
@@ -157,7 +159,7 @@ resource "aws_security_group" "bastion" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # BUG: should be restricted to management CIDR
+    cidr_blocks = [var.management_cidr]
   }
 
   egress {
@@ -172,6 +174,24 @@ resource "aws_security_group" "bastion" {
   }
 }
 
+# SG for EKS cluster control plane ENIs (cluster endpoint access)
+resource "aws_security_group" "eks_cluster" {
+  name_prefix = "${var.cluster_name}-cluster-"
+  vpc_id      = aws_vpc.main.id
+
+  # EKS control plane to nodes (kubelet)
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.cluster_name}-cluster-sg"
+  }
+}
+
 resource "aws_security_group" "eks_nodes" {
   name_prefix = "${var.cluster_name}-nodes-"
   vpc_id      = aws_vpc.main.id
@@ -182,6 +202,15 @@ resource "aws_security_group" "eks_nodes" {
     to_port     = 0
     protocol    = "-1"
     self        = true
+  }
+
+  # Allow control plane to talk to nodes (kubelet + webhook ports)
+  ingress {
+    description     = "Control plane to nodes"
+    from_port       = 1025
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eks_cluster.id]
   }
 
   egress {

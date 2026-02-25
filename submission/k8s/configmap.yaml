@@ -1,7 +1,16 @@
-# configmap.yaml — Video Processor Configuration
-#
-# TASK: Create a ConfigMap for the video-processor deployment.
-#
-# Requirements:
-#   - Application configuration values (e.g., log level, Kafka broker, S3 bucket)
-#   - This ConfigMap should be referenced in your deployment.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: video-processor-config
+  namespace: video-analytics
+  labels:
+    app: video-processor
+data:
+  LOG_LEVEL: "INFO"
+  KAFKA_BROKERS: "msk-bootstrap-brokers:9092"
+  KAFKA_INPUT_TOPIC: "video.fragments"
+  KAFKA_OUTPUT_TOPIC: "video.chunks"
+  S3_BUCKET: "video-analytics-fragments"
+  S3_PREFIX: "processed/"
+  AWS_REGION: "us-east-1"
+  PORT: "8080"
